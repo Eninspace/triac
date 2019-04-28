@@ -1,0 +1,103 @@
+/*
+*/
+
+#include "hw_timer.h"
+
+const byte pwmout = 15;   // Pin D8 esp-12f
+const byte zcin = 14;     // Pin D5 esp-12f
+
+bool state = true;
+
+byte fade = 1;            // Smooth brightness adjustment 0 = off; 1 = on;
+byte state_zc = 0;        // 0 = ready; 1 = processing;
+
+byte c_brightness = 0;    // Current brightness
+byte d_brightness = 100;  // Desired brightness 1-100
+
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(zcin, INPUT_PULLUP);
+  pinMode(pwmout, OUTPUT);
+  attachInterrupt(zcin, zero_crosss_detect, RISING);    // Attach an Interrupt to Pin D5 for Zero Cross Detection
+  hw_timer_init(NMI_SOURCE, 0);
+  hw_timer_set_func(dimTimerISR);
+}
+
+
+
+void loop() {
+  if (Serial.available()) {
+    set_brightness(Serial.parseInt());
+  }
+  
+}
+
+
+
+void dimTimerISR() {
+  if (fade == 1) {
+    if (c_brightness > d_brightness || (state == false && c_brightness > 0)) {
+      --c_brightness;
+    }
+    else if (c_brightness < d_brightness && state == true && c_brightness < 100) {
+      ++c_brightness;
+    }
+  }
+  else {
+    if (state == true) {
+      c_brightness = d_brightness;
+    }
+    else {
+      c_brightness = 0;
+    }
+  }
+
+  if (c_brightness == 0) {
+    state = false;
+    digitalWrite(pwmout, LOW);
+  }
+  else if (c_brightness == 100) {
+    state = true;
+    digitalWrite(pwmout, HIGH);
+  }
+  else {
+    digitalWrite(pwmout, HIGH);
+  }
+
+  state_zc = 0;
+}
+
+
+
+void zero_crosss_detect() {
+
+  // Firing angle calculation : 1 full 50Hz wave =1/50=20ms
+  // Every zerocrossing thus: (50Hz)-> 10ms (1/2 Cycle)
+  // For 60Hz => 8.33ms (10.000/120)
+  // 10ms=10000us
+  // (10000us - 10us) / 100 = 99.9
+
+  if (state_zc == 0) {
+    state_zc = 1;
+
+    if (c_brightness < 100 && c_brightness > 0) {
+      digitalWrite(pwmout, LOW);
+
+      double dimtime = 99.9 * (100 - c_brightness);
+      hw_timer_arm(dimtime);
+    }
+  }
+}
+
+
+
+void set_brightness(int val) {                          // function
+  if (val > 0 && val <= 100) {
+    d_brightness = val;
+    Serial.println(d_brightness);
+  }
+  else if (val > 100) {
+    Serial.println("WARN: Invalid value");
+  }
+}
